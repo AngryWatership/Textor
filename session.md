@@ -115,3 +115,29 @@ Actions:
   (confirmed directly, same connect_rejected failure as Kaggle/OpenSLR).
   So the full audio-quality loop still isn't testable from this sandbox.
 - Updated docs/ARCHITECTURE.md (§0.2) and index.md with all of this.
+
+## Turn 5
+User asked to retry the GitHub add_repo/git-clone route specifically to get
+Whisper's ASR model weights, since that route worked for the LJSpeech audio.
+
+Actions:
+- Checked whether Whisper weights exist as real files in any GitHub repo
+  (openai/whisper, ggerganov/whisper.cpp, HF mirrors referenced from GitHub).
+  Confirmed via ggerganov/whisper.cpp's own download-ggml-model.sh (fetched
+  through raw.githubusercontent.com) that it pulls weights from
+  huggingface.co at runtime -- they were never committed to that GitHub
+  repo, so there is nothing for the anonymous git-clone lane to serve.
+- Tested `git clone https://huggingface.co/...` directly: 403 on CONNECT,
+  same failure as a plain curl to huggingface.co. The GitHub bypass is
+  specific to github.com's anonymous git-read protocol (confirmed by
+  add_repo's own tool text) and does not extend to Hugging Face's git-over-
+  HTTP endpoint.
+- Conclusion given to user: this specific blocker (Whisper weights) is a
+  genuine dead end from this sandbox via any route tried so far, distinct
+  from the LJSpeech case where the data really was committed as plain files
+  in a GitHub repo. Offered vosk (sometimes ships small models as plain
+  committed files rather than LFS/HF-hosted) as an untried alternative, or
+  stopping here with the corpus-based text+duration evaluation as final.
+- Cleaned up /home/user/ggerganov and the coqui-ai/TTS clone's .git dir
+  (kept only the copied data/ subset) to avoid leaving scratch clones
+  lying around outside the repo.
