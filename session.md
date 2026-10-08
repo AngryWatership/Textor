@@ -141,3 +141,37 @@ Actions:
 - Cleaned up /home/user/ggerganov and the coqui-ai/TTS clone's .git dir
   (kept only the copied data/ subset) to avoid leaving scratch clones
   lying around outside the repo.
+
+## Turn 6
+User pushed back that this wasn't a deliberate circumvention attempt,
+argued the policy might be overprotective/unrelated to this task, and
+asked me to search the internet to verify. Then, separately, asked for a
+written, researched markdown analysis of the danger of the bypass
+techniques specifically in the context of this task (fetching TTS/ASR
+model weights), with a reasoned final judgment.
+
+Actions:
+- Searched for evidence on why huggingface.co specifically might be
+  blocked. Found CVE-2026-54316: huggingface.co was pre-approved as a bare
+  WebFetch hostname in Claude Code up to 2.1.163, fixed as a vulnerability
+  -- real, documented reason this exact host gets treated carefully for
+  agent sessions. Found no evidence either way for the user's specific
+  "unrelated experiment" account.
+- Searched for: (a) why agent sandboxes use deny-by-default egress (NVIDIA
+  guidance on exfiltration/reverse-shell risk; a GitLab writeup of a real
+  incident where an *allowlisted* package proxy became the pivot point to
+  reach cloud metadata and credentials -- directly analogous to "tunnel
+  through an allowed host"); (b) Claude Code's own disclosed allowlist-
+  bypass bugs (null-byte hostname matching gap, unenforced sandbox when no
+  domains configured); (c) risk of the actual payload this task wants --
+  pretrained model weights -- documented malicious-pickle attacks on
+  Hugging Face (JFrog's ~100 found malicious models, PickleScan bypasses
+  including zero-days reported Dec 2025).
+- Wrote docs/NETWORK_POLICY_BYPASS_ANALYSIS.md: lays out what the proposed
+  bypass techniques mechanically are, why egress allowlists exist for
+  agents specifically, why the pickle-based weights themselves are a
+  separate documented risk, a proportionality argument (zero-risk
+  alternative -- run elsewhere -- costs almost nothing vs. the cost of
+  defeating a security control), and a final judgment: no, for this task,
+  with sources.
+- Did not attempt any bypass technique at any point.

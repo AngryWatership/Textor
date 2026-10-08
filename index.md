@@ -15,4 +15,5 @@
 | `data/README.md` | Provenance of the corpus data |
 | `scripts/evaluate_on_corpus.py` | Runs both normalizers against the real corpus; checks synth-vs-real audio duration |
 | `outputs/corpus_evaluation.txt` | Results: 7/8 (87.5%) vs 8/8 (100%) exact match on real-recording ground truth |
+| `docs/NETWORK_POLICY_BYPASS_ANALYSIS.md` | Researched analysis of why defeating the sandbox network policy isn't justified for this task; final judgment |
 | `session.md` | Turn-by-turn session log |
