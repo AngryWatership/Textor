@@ -16,6 +16,58 @@ engineering risk isn't "can we get a voice to speak text," it's:
 
 That's what this doc plans for.
 
+## 0.1 Is the current implementation usable? (added after accuracy check)
+
+**No — the code in this repo is a pipeline prototype, not a usable product.**
+It proves the *shape* of the architecture works; it is not a preview of the
+quality users would get. Concretely:
+
+- The TTS engine is `espeak-ng`, a 1990s-style formant synthesizer used only
+  because real neural voices (Piper) are unreachable from this sandbox.
+  It is intelligible but robotic — nowhere near what you'd ship.
+- The "correction LLM" is 60 lines of regex (`scripts/correct.py`), not a
+  model. I benchmarked it against 23 hand-built test sentences covering the
+  categories any TTS normalizer must handle (abbreviations, numbers, dates,
+  decimals, currency, ordinals, acronyms, time, percent) — see
+  `scripts/benchmark_correct.py` and `outputs/correction_benchmark.txt`.
+
+  **Result: 6/23 exact matches (26%).** It does the two things it was built
+  to do (small numbers 0–9, the 7 abbreviations in its hardcoded dict) and
+  fails almost everything else a real normalizer needs:
+  - any number over 2 digits is left as digits ("2024 reasons" stays
+    "2024 reasons" instead of "two thousand twenty-four")
+  - decimals, currency, dates, times, ordinals, and percents are not
+    handled at all ("$9.99" → "nine dollars and ninety-nine cents" never
+    happens; it becomes "$nine.99")
+  - abbreviation expansion is naive string substitution with no word-boundary
+    or context check, so it also mangles things like "St." when it means
+    "Saint" vs. "Street" in the same sentence, and silently does nothing for
+    any abbreviation not in its small dict (Prof., Fig., etc.)
+
+  This number is exactly what you'd expect from a hand-rolled regex script
+  standing in for an LLM — it's a fair, reproducible baseline, not a
+  surprise. The point of measuring it is to make the gap explicit instead of
+  letting "it ran without errors" be mistaken for "it works."
+
+- **Audio quality itself was not and could not be measured here.** There is
+  no reference audio, no MOS (mean opinion score) model, and no human
+  listener in this sandbox — only text-level checks. Judging whether Piper
+  (or any real voice) sounds natural requires either a real device/human
+  listening pass, or an automated speech-quality metric (e.g. UTMOS,
+  NISQA) run against generated audio, neither of which is available in
+  this container.
+
+**What would make it usable:**
+1. Swap `correct_for_speech()` for a real small LLM (§2.2) and re-run
+   `benchmark_correct.py` (or a larger version of it) as the acceptance
+   bar — target should be close to 100% on a benchmark like this, since
+   these are the easy, unambiguous cases; real text will be harder.
+2. Swap `espeak-ng` for Piper via sherpa-onnx (§2.1) and do a human listening
+   pass, since voice naturalness isn't something text metrics can capture.
+3. Treat the 26% number as the "before" baseline worth re-running this exact
+   benchmark against once a real correction model is in, to know concretely
+   how much it improved.
+
 ## 1. What was validated in this sandbox vs. what wasn't
 
 This container's network policy blocks `huggingface.co` and `github.com`

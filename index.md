@@ -6,6 +6,8 @@
 | `scripts/correct.py` | Deterministic text-normalization module (stand-in for the small correction LLM) |
 | `scripts/tts_pipeline.py` | End-to-end pipeline: raw text -> correction -> TTS (espeak-ng) -> wav |
 | `scripts/validate.py` | Runs sample sentences through the pipeline, saves audio + a report |
+| `scripts/benchmark_correct.py` | Accuracy benchmark for the correction stage (23 hand-built cases) |
 | `outputs/samples/*.wav` | Synthesized audio from validation run |
 | `outputs/validation_report.md` | Report of what was tested and results |
+| `outputs/correction_benchmark.txt` | Accuracy results: 6/23 (26%) exact match, with failure breakdown |
 | `session.md` | Turn-by-turn session log |
