@@ -18,8 +18,10 @@ import subprocess
 from functools import lru_cache
 
 import cmudict
+import panphon.distance
 
 _CMUDICT = cmudict.dict()
+_PANPHON_DIST = panphon.distance.Distance()
 
 # ARPABET has no single-character stress marks; strip stress digits (0/1/2)
 # so "AE1" and "AE0" compare equal -- stress doesn't change which word it is.
@@ -90,6 +92,31 @@ def phonetic_similarity(phrase_a: str, phrase_b: str, lang: str = "en-us") -> fl
 
     ipa_a, ipa_b = ipa_phones(phrase_a, lang), ipa_phones(phrase_b, lang)
     dist = phoneme_edit_distance(list(ipa_a.replace(" ", "")), list(ipa_b.replace(" ", "")))
+    return 1 - dist / max(len(ipa_a), len(ipa_b), 1)
+
+
+def phonetic_class_similarity(phrase_a: str, phrase_b: str, lang: str = "en-us") -> float:
+    """Looser similarity using panphon's dolgo-prime distance: phones are
+    compared by broad articulatory class (vowel/nasal/stop/...) instead of
+    exact identity, so an inserted/altered vowel costs less than it does
+    under phoneme_edit_distance's exact-match scoring.
+
+    This catches real misrecognitions phonetic_similarity misses --
+    "enzymes" heard for "gems" scores 0.33 under exact ARPABET edit distance
+    (confirmed on a real dictated voice memo) but 0.62 here, because both
+    metrics agree on the consonant skeleton and only disagree on an
+    inserted vowel+nasal. Calibrated against known cases (see
+    outputs/phonetic_vs_llm_analysis.md and
+    outputs/whisper_limits_analysis.md): true matches (gems/enzymes 0.62,
+    basket/bash kit 1.00, Kubernetes/uber meets 0.85) score above ~0.6;
+    unrelated words (sky/blue 0.40) and the hardest confirmed misses
+    (OAuth/UV No.1 0.59) stay at or below it. Use alongside, not instead
+    of, phonetic_similarity -- this metric is more forgiving in both
+    directions, so it's a recall booster, not a precision improvement.
+    """
+    ipa_a = ipa_phones(phrase_a, lang)
+    ipa_b = ipa_phones(phrase_b, lang)
+    dist = _PANPHON_DIST.dolgo_prime_distance(ipa_a, ipa_b)
     return 1 - dist / max(len(ipa_a), len(ipa_b), 1)
 
 

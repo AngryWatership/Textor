@@ -13,7 +13,22 @@ similar. A real implementation needs that frequency weighting; this is a
 proof of concept of the phonetic-distance mechanism itself.
 """
 
-from phonetic_bridge import arpabet_phones, ipa_phones, phoneme_edit_distance
+from phonetic_bridge import (
+    arpabet_phones,
+    ipa_phones,
+    phoneme_edit_distance,
+    phonetic_class_similarity,
+    phonetic_similarity,
+)
+
+# phonetic_class_similarity alone is too permissive once scanning every
+# window against every vocab word -- confirmed empirically: it flagged
+# "the"->Docker (0.83) and "my"->mirror (0.80) as plausible misses, pure
+# false positives. Requiring exact phonetic_similarity to also clear this
+# (much lower) bar fixes it: every real miss tested so far scores >=0.33
+# here, every false positive found during testing scored <=0.25 -- see
+# outputs/phonetic_vs_llm_analysis.md for the full calibration table.
+JARGON_EXACT_GATE = 0.3
 
 _DEFAULT_VOCAB = [
     "basket", "two", "eggs", "bear", "weather", "whether", "write", "right",
@@ -23,19 +38,19 @@ _DEFAULT_VOCAB = [
 ]
 
 # Technical jargon CMUdict doesn't cover (confirmed in
-# outputs/phonetic_vs_llm_analysis.md), extend with the user's own terms as
-# needed -- this list is exactly what makes the correction stage useful for
-# a given person's vocabulary rather than generic English.
+# outputs/phonetic_vs_llm_analysis.md), extend with the user's own terms --
+# this list is exactly what makes the correction stage useful for a given
+# person's vocabulary/project rather than generic English. "gems" is a real
+# confirmed miss from a real dictated voice memo (Whisper heard "enzymes").
 _DEFAULT_JARGON_VOCAB = [
     "OAuth", "idempotent", "JSON", "Kubernetes", "GPT", "LLM", "API",
     "async", "kernel", "GitHub", "Python", "Docker",
+    "gems", "cycle", "mirror", "stage",
 ]
 
-# Below this, Whisper's error diverged too far phonetically to recover by
-# matching alone (e.g. "OAuth" -> "UV No.1" scores ~0.2-0.4 -- see
-# outputs/whisper_limits_analysis.md); flagging for user confirmation rather
-# than auto-correcting is the right move below this threshold, same
-# reasoning as the true-homophone case in correct_phrase.
+# Calibrated against known cases (see phonetic_bridge.phonetic_class_similarity
+# docstring): true matches score above this, unrelated words and the
+# hardest confirmed misses (OAuth -> "UV No.1") stay at or below it.
 JARGON_FLAG_THRESHOLD = 0.6
 
 
@@ -55,17 +70,25 @@ def correct_phrase(
     max_span=2,
     same_length_threshold=1.0,
     merge_threshold=0.65,
-) -> str:
-    """Substitute spans with phonetically-close vocab words.
+) -> tuple[str, list[dict]]:
+    """Fix word-boundary merge errors; flag (don't auto-fix) true homophones.
 
-    Two different rules, because they carry different false-positive risk:
-    - same word count (e.g. "whether" -> "weather"): only a true homophone
-      (similarity 1.0) qualifies -- anything looser swaps out correct short
-      words too often (e.g. "I" ~ "buy" at 0.5 similarity, but they are not
-      interchangeable).
-    - word-count-reducing merge (e.g. "bash kit" -> "basket"): the actual
-      error case this module targets, so a looser threshold is acceptable
-      since collapsing two words into one rarely happens by chance.
+    Two cases, handled differently because sound alone resolves one but not
+    the other:
+    - word-count-reducing merge (e.g. "bash kit" -> "basket"): auto-corrected.
+      Low false-positive risk -- collapsing two words into one rarely
+      happens by chance -- and there's nothing sound-based left to be
+      ambiguous about once two words plausibly merge into one real word.
+    - same word count, true homophone (e.g. "to"/"two", "there"/"their"):
+      flagged, never silently substituted. Confirmed necessary on real
+      dictated audio (see outputs/whisper_limits_analysis.md addendum):
+      whether "to" should become "two" depends on grammar/context the
+      sound carries no information about -- auto-correcting it is a
+      coin flip that actively breaks already-correct text as often as
+      it fixes wrong text.
+
+    Returns (text_with_merges_applied, homophone_flags) -- flags have the
+    same shape as flag_jargon()'s, so callers can render both the same way.
     """
     words = text.rstrip(".").split()
     trailing = "." if text.rstrip().endswith(".") else ""
@@ -75,8 +98,10 @@ def correct_phrase(
 
     i = 0
     out_words: list[str] = []
+    flags: list[dict] = []
     while i < len(words):
-        best_match, best_sim, best_span = None, -1.0, 1
+        best_merge, best_merge_sim, best_merge_span = None, -1.0, 1
+        best_homophone, best_homophone_sim = None, -1.0
         for span in range(1, max_span + 1):
             if i + span > len(words):
                 continue
@@ -89,23 +114,29 @@ def correct_phrase(
                 if cand.lower() == span_text.lower():
                     continue
                 cand_word_count = len(cand.split())
-                if cand_word_count == span:
-                    required = same_length_threshold  # true-homophone swap
-                elif cand_word_count < span:
-                    required = merge_threshold  # word-count-reducing merge
-                else:
-                    continue  # never expand a span into more words
                 dist = phoneme_edit_distance(sp, cp)
                 sim = 1 - dist / max(len(sp), len(cp), 1)
-                if sim >= required and sim > best_sim:
-                    best_match, best_sim, best_span = cand, sim, span
-        if best_match is not None:
-            out_words.append(best_match)
-            i += best_span
+                if cand_word_count == span:
+                    if sim >= same_length_threshold and sim > best_homophone_sim:
+                        best_homophone, best_homophone_sim = cand, sim
+                elif cand_word_count < span:
+                    if sim >= merge_threshold and sim > best_merge_sim:
+                        best_merge, best_merge_sim, best_merge_span = cand, sim, span
+                # cand_word_count > span: never expand a span into more words
+        if best_merge is not None:
+            out_words.append(best_merge)
+            i += best_merge_span
         else:
+            if best_homophone is not None:
+                flags.append({
+                    "span_text": words[i],
+                    "suggestion": best_homophone,
+                    "confidence": round(best_homophone_sim, 2),
+                    "word_index": i,
+                })
             out_words.append(words[i])
             i += 1
-    return " ".join(out_words) + trailing
+    return " ".join(out_words) + trailing, flags
 
 
 def flag_jargon(
@@ -127,8 +158,6 @@ def flag_jargon(
     text via its letter-to-sound rules, even invented/technical words.
     """
     words = text.rstrip(".").split()
-    vocab_ipa = {v: ipa_phones(v).replace(" ", "") for v in vocab}
-
     vocab_lower = {v.lower() for v in vocab}
     flags = []
     i = 0
@@ -145,12 +174,18 @@ def flag_jargon(
             if any(words[j].lower() in vocab_lower for j in range(i + 1, i + span)):
                 break
             span_text = " ".join(words[i : i + span])
-            span_ipa = ipa_phones(span_text).replace(" ", "")
-            for term, term_ipa in vocab_ipa.items():
+            for term in vocab:
                 if term.lower() == span_text.lower():
                     continue  # already correct, nothing to flag
-                dist = phoneme_edit_distance(list(term_ipa), list(span_ipa))
-                sim = 1 - dist / max(len(term_ipa), len(span_ipa), 1)
+                # dolgo-prime (broad articulatory class) catches real misses
+                # that exact phoneme matching doesn't -- "enzymes" heard for
+                # "gems" (a real dictated miss) scores 0.33 on exact IPA
+                # edit distance but 0.62 here -- but gated by the exact
+                # metric too, since dolgo-prime alone is too permissive on
+                # short/common words (see JARGON_EXACT_GATE above).
+                if phonetic_similarity(term, span_text) < JARGON_EXACT_GATE:
+                    continue
+                sim = phonetic_class_similarity(term, span_text)
                 if sim > best_sim:
                     best_term, best_sim, best_span = term, sim, span
         if best_term is not None and best_sim >= threshold:
@@ -173,7 +208,8 @@ if __name__ == "__main__":
         "I seen a bare in the whether today.",
     ]
     for t in tests:
-        print(f"{t!r} -> {correct_phrase(t)!r}")
+        corrected, flags = correct_phrase(t)
+        print(f"{t!r} -> {corrected!r}  homophone_flags={flags}")
 
     print()
     print("Jargon flagging (confirm-don't-auto-correct):")
