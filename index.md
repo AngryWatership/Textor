@@ -10,4 +10,9 @@
 | `outputs/samples/*.wav` | Synthesized audio from validation run |
 | `outputs/validation_report.md` | Report of what was tested and results |
 | `outputs/correction_benchmark.txt` | Accuracy results: regex stand-in 6/23 (26%) vs. real `english-text-normalization` lib 12/23 (52%) |
+| `data/ljspeech_sample_metadata.csv` | 8 real utterances: raw text + ground-truth normalized transcript (from coqui-ai/TTS test fixtures, public-domain LJSpeech slice) |
+| `data/ljspeech_sample_wavs/` | Matching real recorded audio for those 8 utterances |
+| `data/README.md` | Provenance of the corpus data |
+| `scripts/evaluate_on_corpus.py` | Runs both normalizers against the real corpus; checks synth-vs-real audio duration |
+| `outputs/corpus_evaluation.txt` | Results: 7/8 (87.5%) vs 8/8 (100%) exact match on real-recording ground truth |
 | `session.md` | Turn-by-turn session log |

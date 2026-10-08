@@ -84,6 +84,50 @@ quality users would get. Concretely:
   NISQA) run against generated audio, neither of which is available in
   this container.
 
+## 0.2 Testing against real recordings + ground-truth transcripts
+
+Per a follow-up request, I tracked down an actual audio+transcript corpus
+rather than relying only on hand-built text cases. `kaggle.com`,
+`openslr.org`, `commonvoice.mozilla.org`, and `keithito.com` (LJSpeech's
+original host) are all sandbox-policy-blocked (`connect_rejected`). But
+GitHub repos are reachable via `add_repo` + `git clone` regardless of
+content (confirmed in §0.1), and several open-source TTS projects bundle a
+small slice of LJSpeech as test fixtures. `coqui-ai/TTS` has 8 such
+utterances with real recorded audio under `tests/data/ljspeech` — copied
+into this repo at `data/ljspeech_sample_wavs/` and
+`data/ljspeech_sample_metadata.csv` (see `data/README.md`).
+
+This is a meaningfully better test than the hand-built benchmark: the
+`normalized_text` column is LJSpeech's own ground-truth spoken form,
+written by that dataset's original authors, not by us, and it's paired
+with a human actually speaking it. `scripts/evaluate_on_corpus.py` runs
+both correction normalizers against it and checks synthesized-vs-real
+audio duration as a sanity bound. Results (`outputs/corpus_evaluation.txt`):
+
+| Normalizer | Exact-match vs. ground truth | Mean synth/real duration ratio |
+|---|---|---|
+| rule-based stand-in (`correct.py`) | 7/8 = 87.5% | 0.96 |
+| `english-text-normalization` (real pip lib) | 8/8 = 100% | 0.95 |
+
+Both numbers look better here than on the earlier 23-case benchmark — this
+corpus happens to contain only one normalization-worthy case (a single
+4-digit year, "1455"), so it's a much easier test, not evidence the regex
+script is actually fine. The 23-case benchmark (§0.1) is the harder, more
+representative one; take this corpus result as "doesn't break on real
+recorded speech content," not as a quality bar.
+
+I also tried to close the loop fully — synthesize audio, run it back
+through ASR (Whisper), and check the transcription against ground truth,
+which would test the *actual audio*, not just the text stage. `openai-whisper`
+installs fine (pure PyPI), but its model weights are hosted on
+`openaipublic.azureedge.net`, which is also sandbox-policy-blocked
+(confirmed directly: `connect_rejected` at the egress proxy, same failure
+mode as Kaggle/OpenSLR). So the audio-quality side of this evaluation is
+still limited to duration sanity-checking, not transcription accuracy on
+synthesized audio. That closed loop (synth → ASR → compare) is worth
+running in an environment that can reach Whisper's weights, or on-device
+once Piper is wired in for real.
+
 **What would make it usable:**
 1. Swap `correct_for_speech()` for a real small LLM (§2.2) and re-run
    `benchmark_correct.py` (or a larger version of it) as the acceptance

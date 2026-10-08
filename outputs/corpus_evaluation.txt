@@ -1,0 +1,49 @@
+Loaded 8 real recorded utterances with ground-truth normalization.
+
+=== rule-based stand-in (scripts/correct.py): text normalization accuracy vs. ground truth ===
+  [OK] LJ001-0001
+  [OK] LJ001-0002
+  [OK] LJ001-0003
+  [OK] LJ001-0004
+  [OK] LJ001-0005
+  [OK] LJ001-0006
+  [FAIL] LJ001-0007
+      raw:        'the earliest book printed with movable types, the Gutenberg, or "forty-two line Bible" of about 1455,'
+      ground truth: 'the earliest book printed with movable types, the Gutenberg, or "forty-two line Bible" of about fourteen fifty-five,'
+      got:        'the earliest book printed with movable types, the Gutenberg, or "forty-two line Bible" of about 1455,'
+  [OK] LJ001-0008
+  -> 7/8 = 87.5%
+
+=== english-text-normalization (real pip library): text normalization accuracy vs. ground truth ===
+  [OK] LJ001-0001
+  [OK] LJ001-0002
+  [OK] LJ001-0003
+  [OK] LJ001-0004
+  [OK] LJ001-0005
+  [OK] LJ001-0006
+  [OK] LJ001-0007
+  [OK] LJ001-0008
+  -> 8/8 = 100.0%
+
+=== rule_based_stand_in: synthesized vs. real recording duration ===
+  LJ001-0001: real=9.66s synth=9.57s ratio=0.99
+  LJ001-0002: real=1.90s synth=2.11s ratio=1.11
+  LJ001-0003: real=9.67s synth=8.65s ratio=0.90
+  LJ001-0004: real=5.14s synth=4.87s ratio=0.95
+  LJ001-0005: real=8.11s synth=7.65s ratio=0.94
+  LJ001-0006: real=5.68s synth=4.66s ratio=0.82
+  LJ001-0007: real=8.39s synth=8.50s ratio=1.01
+  LJ001-0008: real=1.78s synth=1.75s ratio=0.98
+  -> mean synth/real duration ratio: 0.96
+
+=== english_text_normalization: synthesized vs. real recording duration ===
+  LJ001-0001: real=9.66s synth=9.57s ratio=0.99
+  LJ001-0002: real=1.90s synth=2.11s ratio=1.11
+  LJ001-0003: real=9.67s synth=8.65s ratio=0.90
+  LJ001-0004: real=5.14s synth=4.87s ratio=0.95
+  LJ001-0005: real=8.11s synth=7.65s ratio=0.94
+  LJ001-0006: real=5.68s synth=4.66s ratio=0.82
+  LJ001-0007: real=8.39s synth=7.45s ratio=0.89
+  LJ001-0008: real=1.78s synth=1.75s ratio=0.98
+  -> mean synth/real duration ratio: 0.95
+

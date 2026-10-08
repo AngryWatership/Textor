@@ -82,3 +82,36 @@ Actions:
   relevant section of `docs/ARCHITECTURE.md` with the corrected, more
   precise picture (what's genuinely gone vs. what's sandbox-blocked, and
   the second independent accuracy data point).
+
+## Turn 4
+User asked to extract/get a library of recordings with correct
+transcriptions to fully test the pipeline.
+
+Actions:
+- Confirmed openslr.org, commonvoice.mozilla.org, keithito.com (LJSpeech's
+  original host) are all sandbox-policy-blocked the same way Kaggle was.
+- Used the add_repo + git clone path again (confirmed working regardless of
+  a GitHub repo's content, not just metadata) on coqui-ai/TTS, sparse-
+  checked out its tests/ directory, and found it bundles 8 real LJSpeech
+  utterances with actual recorded audio (tests/data/ljspeech), including
+  metadata.csv with raw_text and the dataset authors' own ground-truth
+  normalized_text per utterance.
+- Copied that subset into data/ljspeech_sample_{metadata.csv,wavs/} with a
+  README noting provenance (public-domain LJSpeech slice via an open-source
+  project's own test fixtures).
+- Wrote scripts/evaluate_on_corpus.py: scores both normalizers against the
+  real ground-truth transcripts, and synthesizes audio for each to compare
+  duration against the real human recording as a sanity bound.
+- Results: rule-based stand-in 7/8 (87.5%), english-text-normalization 8/8
+  (100%) exact match; synth/real duration ratios ~0.95-0.96 for both. Noted
+  this corpus is easier than the 23-case benchmark (only one real
+  normalization case present), so it's not evidence the regex script is
+  actually fine -- it shows the pipeline doesn't break on real content, not
+  a quality bar.
+- Tried to close the loop fully with ASR (install openai-whisper, run it on
+  our synthesized audio, compare transcription to ground truth). Whisper
+  installs fine from PyPI, but its model weights are hosted on
+  openaipublic.azureedge.net, which is also sandbox-policy-blocked
+  (confirmed directly, same connect_rejected failure as Kaggle/OpenSLR).
+  So the full audio-quality loop still isn't testable from this sandbox.
+- Updated docs/ARCHITECTURE.md (§0.2) and index.md with all of this.
