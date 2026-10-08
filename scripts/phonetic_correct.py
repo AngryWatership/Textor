@@ -13,7 +13,7 @@ similar. A real implementation needs that frequency weighting; this is a
 proof of concept of the phonetic-distance mechanism itself.
 """
 
-from phonetic_bridge import arpabet_phones, phoneme_edit_distance
+from phonetic_bridge import arpabet_phones, ipa_phones, phoneme_edit_distance
 
 _DEFAULT_VOCAB = [
     "basket", "two", "eggs", "bear", "weather", "whether", "write", "right",
@@ -21,6 +21,22 @@ _DEFAULT_VOCAB = [
     "piece", "peace", "break", "brake", "meat", "meet", "sea", "see",
     "night", "knight", "hear", "here", "wait", "weight", "sun", "son",
 ]
+
+# Technical jargon CMUdict doesn't cover (confirmed in
+# outputs/phonetic_vs_llm_analysis.md), extend with the user's own terms as
+# needed -- this list is exactly what makes the correction stage useful for
+# a given person's vocabulary rather than generic English.
+_DEFAULT_JARGON_VOCAB = [
+    "OAuth", "idempotent", "JSON", "Kubernetes", "GPT", "LLM", "API",
+    "async", "kernel", "GitHub", "Python", "Docker",
+]
+
+# Below this, Whisper's error diverged too far phonetically to recover by
+# matching alone (e.g. "OAuth" -> "UV No.1" scores ~0.2-0.4 -- see
+# outputs/whisper_limits_analysis.md); flagging for user confirmation rather
+# than auto-correcting is the right move below this threshold, same
+# reasoning as the true-homophone case in correct_phrase.
+JARGON_FLAG_THRESHOLD = 0.6
 
 
 def _span_phones(words: list[str]) -> list[str] | None:
@@ -92,6 +108,64 @@ def correct_phrase(
     return " ".join(out_words) + trailing
 
 
+def flag_jargon(
+    text: str,
+    vocab: list[str] = _DEFAULT_JARGON_VOCAB,
+    max_span: int = 2,
+    threshold: float = JARGON_FLAG_THRESHOLD,
+) -> list[dict]:
+    """Find spans that are plausibly a misheard technical term.
+
+    Unlike correct_phrase, this never auto-replaces -- it returns candidate
+    flags (span, suggestion, confidence) for the caller (editor UI) to show
+    to the user, same "flag, don't silently rewrite" reasoning as true
+    homophones: a wrong auto-correction on a real word is worse than asking.
+
+    Uses espeak-ng IPA rather than CMUdict, since jargon like "OAuth" and
+    "idempotent" isn't in CMUdict's 126k English words (confirmed in
+    outputs/phonetic_vs_llm_analysis.md) but espeak-ng can phonemicize any
+    text via its letter-to-sound rules, even invented/technical words.
+    """
+    words = text.rstrip(".").split()
+    vocab_ipa = {v: ipa_phones(v).replace(" ", "") for v in vocab}
+
+    vocab_lower = {v.lower() for v in vocab}
+    flags = []
+    i = 0
+    while i < len(words):
+        if words[i].lower() in vocab_lower:
+            i += 1  # already an exact match -- don't let a longer fuzzy
+            continue  # span starting here outscore this by coincidence
+        best_term, best_sim, best_span = None, -1.0, 1
+        for span in range(1, max_span + 1):
+            if i + span > len(words):
+                continue
+            # an exact-match word inside the window is a hard boundary --
+            # never let a fuzzy span swallow a word that's already correct
+            if any(words[j].lower() in vocab_lower for j in range(i + 1, i + span)):
+                break
+            span_text = " ".join(words[i : i + span])
+            span_ipa = ipa_phones(span_text).replace(" ", "")
+            for term, term_ipa in vocab_ipa.items():
+                if term.lower() == span_text.lower():
+                    continue  # already correct, nothing to flag
+                dist = phoneme_edit_distance(list(term_ipa), list(span_ipa))
+                sim = 1 - dist / max(len(term_ipa), len(span_ipa), 1)
+                if sim > best_sim:
+                    best_term, best_sim, best_span = term, sim, span
+        if best_term is not None and best_sim >= threshold:
+            flags.append({
+                "span_text": " ".join(words[i : i + best_span]),
+                "suggestion": best_term,
+                "confidence": round(best_sim, 2),
+                "word_index": i,
+            })
+            i += best_span
+        else:
+            i += 1
+    return flags
+
+
 if __name__ == "__main__":
     tests = [
         "I have to get in the bash kit.",
@@ -100,3 +174,14 @@ if __name__ == "__main__":
     ]
     for t in tests:
         print(f"{t!r} -> {correct_phrase(t)!r}")
+
+    print()
+    print("Jargon flagging (confirm-don't-auto-correct):")
+    jargon_tests = [
+        "the cluster run mark uber meets",
+        "we store the config as J-1",
+        "the PPT and LLM API my rate limited",
+        "I am UV No.1 for authentication",
+    ]
+    for t in jargon_tests:
+        print(f"  {t!r} -> {flag_jargon(t)}")
