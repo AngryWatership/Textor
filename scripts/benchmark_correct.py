@@ -1,16 +1,22 @@
 """
 Hand-built benchmark for the correction stage (`correct_for_speech`).
 
-There is no real text-normalization dataset reachable from this sandbox
-(Google's TN Challenge data lives on Kaggle/GCS, rwsproat/text-normalization-data
-on GitHub ships data via release assets, not raw files -- both are behind
-the network policy blocking kaggle.com/github.com release downloads here).
+The standard research dataset here (Google's TN Challenge data) turned out
+to be genuinely gone: the rwsproat/text-normalization-data GitHub repo only
+points at a Google Cloud Storage bucket (gs://text-normalization/...), and
+that bucket now returns AccessDenied from Google itself -- not a sandbox
+policy block, the data is just no longer public. Kaggle, which mirrors the
+same dataset, IS blocked by this sandbox's network policy (connect_rejected
+at the egress proxy), confirmed separately from the GCS case.
+
 So this is a small, hand-curated benchmark covering the categories every
 TTS text-normalizer has to handle: abbreviations (in-vocabulary and
 out-of-vocabulary), small and large numbers, decimals, dates, currency,
-ordinals, acronyms, and ambiguous abbreviations. It exists to give an
-honest, reproducible accuracy number for the *current* rule-based stand-in,
-and a regression baseline for whatever correction LLM replaces it later.
+ordinals, acronyms, and ambiguous abbreviations. It scores two normalizers
+against it: the hand-rolled regex stand-in in this repo, and
+`english-text-normalization` (pip-installable, MIT-licensed, real published
+code -- not written for this task) as a second, independent reference
+point for what a real normalizer gets right and wrong on the same cases.
 
 Scoring: exact string match against a single "acceptable" normalization.
 Real text normalization often has multiple valid outputs (e.g. "5" could
@@ -20,6 +26,11 @@ hidden by a lenient scorer.
 """
 
 from correct import correct_for_speech
+
+try:
+    from english_text_normalization.normalization_pipeline import general_pipeline
+except ImportError:
+    general_pipeline = None
 
 CASES = [
     # (category, input, expected_output)
@@ -49,16 +60,20 @@ CASES = [
 ]
 
 
-def main() -> None:
+def score(normalizer, label: str) -> None:
     results = []
     for category, raw, expected in CASES:
-        actual = correct_for_speech(raw)
+        try:
+            actual = normalizer(raw)
+        except Exception as exc:  # noqa: BLE001 -- surfacing any normalizer crash as a result
+            actual = f"ERROR: {exc}"
         ok = actual.strip() == expected.strip()
         results.append((category, raw, expected, actual, ok))
 
     total = len(results)
     passed = sum(1 for r in results if r[-1])
 
+    print(f"=== {label} ===")
     print(f"Overall exact-match accuracy: {passed}/{total} = {passed/total:.1%}")
     print()
     by_cat: dict[str, list[bool]] = {}
@@ -74,6 +89,15 @@ def main() -> None:
             print(f"  [{category}] {raw!r}")
             print(f"    expected: {expected!r}")
             print(f"    actual:   {actual!r}")
+    print()
+
+
+def main() -> None:
+    score(correct_for_speech, "rule-based stand-in (scripts/correct.py)")
+    if general_pipeline is not None:
+        score(general_pipeline, "english-text-normalization (real pip library, general_pipeline)")
+    else:
+        print("english-text-normalization not installed; skipping that comparison")
 
 
 if __name__ == "__main__":

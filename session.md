@@ -48,3 +48,37 @@ Actions:
   answer is no, current code is a pipeline-shape prototype only. Audio
   quality itself still cannot be assessed in this sandbox (no MOS model, no
   reference audio, no human listener available here).
+
+## Turn 3
+User asked me to actually try code to access datasets, navigate the internet
+harder rather than stopping at the first block.
+
+Actions:
+- Tested more hosts/mirrors directly: cdn.jsdelivr.net, hf-mirror.com,
+  raw.githack.com, gitee.com, archive.org all unreachable (policy or down).
+  codeload.github.com and api.github.com returned a distinct error pointing
+  at `add_repo` -- realized GitHub access is gated per-repo via that tool,
+  not a blanket domain block.
+- Used `add_repo` on `rwsproat/text-normalization-data` (the known TN
+  Challenge dataset repo) -- confirmed public read access, cloned it via
+  git. Found the repo itself only contains a README + a `split.sh` script
+  pointing at `https://storage.googleapis.com/text-normalization/en_with_types.tgz`.
+- Tried that GCS URL directly: got a real `AccessDenied` from Google itself
+  (not our proxy) -- the dataset's bucket is no longer public. Separately
+  confirmed kaggle.com (which mirrors the same data) IS blocked by this
+  sandbox's org policy (`connect_rejected`) -- two different failure causes,
+  now both pinned down precisely instead of lumped together.
+- Searched for alternative sources, found `english-text-normalization` on
+  PyPI (pypi.org is always reachable) -- a real, independently-written,
+  MIT-licensed English TTS text-normalization library with abbreviation,
+  number, currency, date, ordinal, percent handling.
+- Installed it, ran the same 23-case benchmark through its `general_pipeline`:
+  12/23 (52%) exact match, vs. 6/23 (26%) for the hand-rolled regex stand-in.
+  Noted several of its "failures" are actually just alternate valid phrasings
+  (e.g. "2024" -> "twenty twenty-four"), meaning exact-match string equality
+  understates real usability -- flagged this limitation explicitly.
+- Updated `scripts/benchmark_correct.py` to score both normalizers side by
+  side, regenerated `outputs/correction_benchmark.txt`, and rewrote the
+  relevant section of `docs/ARCHITECTURE.md` with the corrected, more
+  precise picture (what's genuinely gone vs. what's sandbox-blocked, and
+  the second independent accuracy data point).

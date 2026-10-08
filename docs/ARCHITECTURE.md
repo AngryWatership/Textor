@@ -49,6 +49,33 @@ quality users would get. Concretely:
   surprise. The point of measuring it is to make the gap explicit instead of
   letting "it ran without errors" be mistaken for "it works."
 
+- **I went and got a second, independent data point rather than trusting my
+  own benchmark in isolation.** The standard research dataset for this
+  (Google's Text Normalization Challenge data) turned out to be genuinely
+  gone, not just sandbox-blocked: its GitHub repo
+  (rwsproat/text-normalization-data) only points at a Google Cloud Storage
+  bucket, and that bucket now returns `AccessDenied` straight from Google —
+  the data was taken off public access, unrelated to this sandbox. Kaggle,
+  which mirrors the same dataset, *is* blocked by this sandbox's network
+  policy (confirmed separately via a `connect_rejected` at the egress
+  proxy) — so that one's on the sandbox, not on the data being gone.
+
+  Instead I installed `english-text-normalization` (a real, independently
+  written, MIT-licensed PyPI package — not something built for this task)
+  and ran the same 23-case benchmark through it: **12/23 (52%)**, exactly
+  double the regex stand-in. It correctly verbalizes large numbers
+  ("1999" → "nineteen ninety-nine"), currency, and ordinals that the regex
+  script never touched, and still gets abbreviation ambiguity wrong
+  ("St." → "Saint" even when it means "Street") and misses acronym
+  letter-spelling and digital time formats. Several of its "misses" are
+  arguably *not* wrong, just a different valid convention than my fixed
+  expected string (e.g. "2024" → "twenty twenty-four" is a completely
+  normal way to say a year aloud) — which is the real lesson: exact-match
+  against one fixed answer understates a working normalizer and makes a
+  broken one look only moderately bad. A real evaluation needs either
+  multiple accepted answers per case or human judgment, not pure string
+  equality. Full comparison in `outputs/correction_benchmark.txt`.
+
 - **Audio quality itself was not and could not be measured here.** There is
   no reference audio, no MOS (mean opinion score) model, and no human
   listener in this sandbox — only text-level checks. Judging whether Piper

@@ -9,5 +9,5 @@
 | `scripts/benchmark_correct.py` | Accuracy benchmark for the correction stage (23 hand-built cases) |
 | `outputs/samples/*.wav` | Synthesized audio from validation run |
 | `outputs/validation_report.md` | Report of what was tested and results |
-| `outputs/correction_benchmark.txt` | Accuracy results: 6/23 (26%) exact match, with failure breakdown |
+| `outputs/correction_benchmark.txt` | Accuracy results: regex stand-in 6/23 (26%) vs. real `english-text-normalization` lib 12/23 (52%) |
 | `session.md` | Turn-by-turn session log |
