@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pywhispercpp.model import Model
 
-from phonetic_correct import correct_phrase, flag_jargon
+from phonetic_correct import correct_phrase
 
 MODEL_PATH = str(Path(__file__).parent.parent / "models" / "ggml-tiny.bin")
 _model = None
@@ -50,43 +50,26 @@ def transcribe(wav_path: Path) -> tuple[str, float]:
     return " ".join(s.text.strip() for s in segments), elapsed
 
 
-def _insert_flags(text: str, flags: list[dict]) -> str:
-    """Inline-annotate flagged spans so a plain .txt file can carry the
-    suggestion without needing a rich-text editor: "J-1 [possibly: JSON?]".
-    The user confirms/dismisses by editing the text directly -- no silent
-    auto-correction of something the system isn't confident about (see
-    outputs/whisper_limits_analysis.md and outputs/phonetic_vs_llm_analysis.md
-    on why jargon misses and true homophones shouldn't be guessed at)."""
-    words = text.split()
-    for flag in sorted(flags, key=lambda f: f["word_index"], reverse=True):
-        span_word_count = len(flag["span_text"].split())
-        idx = flag["word_index"]
-        words[idx + span_word_count - 1] += f' [possibly: {flag["suggestion"]}?]'
-    return " ".join(words)
-
-
 def dictate_to_file(wav_path: Path, out_txt: Path, append: bool = False) -> str:
-    """Full pipeline: audio -> Whisper -> phonetic/jargon correction -> text file.
+    """Full pipeline: audio -> Whisper -> merge correction -> text file.
 
     This is the "save" half of the editor: write (or append to) a plain
     .txt file so it behaves like any other document the app can reopen.
     Word-boundary merge errors (e.g. "bash kit" -> "basket") are
-    auto-corrected; true homophones (e.g. "to"/"two") and technical-jargon
-    misses are both flagged inline for the user to confirm instead, since
-    sound alone can't resolve either reliably (confirmed on real dictated
-    audio -- see outputs/whisper_limits_analysis.md addendum).
+    auto-corrected. Inline "[possibly: X?]" flags were removed -- tested
+    on real dictated audio and found to be mostly false positives,
+    cluttering the output more than they helped (see session notes). The
+    jargon/homophone matching work isn't thrown away, just not wired into
+    this file-writing step until its precision is good enough to trust.
     """
     raw, _ = transcribe(wav_path)
-    corrected, homophone_flags = correct_phrase(raw)
-    jargon_flags = flag_jargon(corrected)
-    all_flags = homophone_flags + jargon_flags
-    annotated = _insert_flags(corrected, all_flags) if all_flags else corrected
+    corrected, _homophone_flags = correct_phrase(raw)
     mode = "a" if append else "w"
     with open(out_txt, mode, encoding="utf-8") as f:
         if append and out_txt.exists() and out_txt.stat().st_size > 0:
             f.write(" ")
-        f.write(annotated)
-    return annotated
+        f.write(corrected)
+    return corrected
 
 
 def open_text_file(path: Path) -> str:
