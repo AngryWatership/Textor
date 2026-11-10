@@ -21,6 +21,7 @@ from sklearn.neighbors import NearestNeighbors
 from data import load_papers, get_or_make_split, LABELS
 from model import VerdictClassifier, load_tokenizer
 from train import PapersDataset
+from runlog import upsert_run
 
 
 def knn_purity(X, labels, k=10, metric="euclidean"):
@@ -38,16 +39,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data/papers.jsonl")
     ap.add_argument("--split-out", default="outputs/split.json")
-    ap.add_argument("--checkpoint", default="outputs/best_model.pt")
+    ap.add_argument("--checkpoint", default=None,
+                     help="defaults to <out-dir>/<run-id>/best_model.pt")
     ap.add_argument("--base-model", default="allenai/specter2_base")
     ap.add_argument("--finetune-mode", choices=["partial", "full"], default="partial")
     ap.add_argument("--max-length", type=int, default=384)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--out-dir", default="outputs")
+    ap.add_argument("--repo-root", default="..")
+    ap.add_argument("--run-id", required=True,
+                     help="must match the run_id used in train.py, so this "
+                          "evaluation's results merge into the same log row")
     args = ap.parse_args()
+    out_dir = Path(args.out_dir) / args.run_id
+    checkpoint_path = args.checkpoint or str(out_dir / "best_model.pt")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    out_dir = Path(args.out_dir)
 
     papers = load_papers(args.data)
     split = get_or_make_split(papers, args.split_out)
@@ -56,7 +63,7 @@ def main():
     test_loader = DataLoader(test_ds, batch_size=args.batch_size)
 
     model = VerdictClassifier(base_model=args.base_model, finetune_mode=args.finetune_mode).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.eval()
 
     all_y, all_pred, all_pooled = [], [], []
@@ -88,6 +95,18 @@ def main():
     }
     (out_dir / "eval_report.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
+
+    upsert_run(args.repo_root, args.run_id, {
+        # test_macro_f1 is NOT set here -- train.py already logs it, and
+        # upsert_run does a plain dict merge, so writing None here would
+        # clobber that real value instead of leaving it alone.
+        "test_silhouette_euclidean": sil,
+        "test_knn10_purity": purity,
+        "test_knn10_purity_per_class": purity_per_class,
+        "confusion_matrix": cm.tolist(),
+        "eval_report_path": str(out_dir / "eval_report.json"),
+    })
+    print(f"run_id={args.run_id} updated in {args.repo_root}/runs_log.jsonl and RUNS.md")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from data import load_papers, get_or_make_split, text_of, LABEL_TO_ID
 from model import VerdictClassifier, load_tokenizer
+from runlog import new_run_id, upsert_run
 
 
 class PapersDataset(Dataset):
@@ -103,6 +104,11 @@ def main():
     ap.add_argument("--patience", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", default="outputs")
+    ap.add_argument("--repo-root", default="..",
+                     help="where runs_log.jsonl / RUNS.md live (repo root, not src/)")
+    ap.add_argument("--run-id", default=None,
+                     help="defaults to <timestamp>_<base_model>_<finetune_mode>; "
+                          "pass explicitly to resume/overwrite a specific run")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -113,8 +119,21 @@ def main():
               "Colab GPU runtime; CPU will be very slow for full/partial "
               "fine-tuning of a transformer encoder.")
 
-    out_dir = Path(args.out_dir)
+    run_id = args.run_id or new_run_id(args.base_model, args.finetune_mode)
+    print(f"run_id: {run_id}")
+    # every run gets its own subdirectory, nothing overwrites a prior run's
+    # checkpoint/config/reports by accident
+    out_dir = Path(args.out_dir) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "run_id": run_id, "base_model": args.base_model,
+        "finetune_mode": args.finetune_mode, "n_unfrozen_layers": args.n_unfrozen_layers,
+        "loss": args.loss, "max_length": args.max_length, "batch_size": args.batch_size,
+        "lr": args.lr, "max_epochs": args.max_epochs, "patience": args.patience,
+        "seed": args.seed,
+    }
+    (out_dir / "config.json").write_text(json.dumps(config, indent=2))
 
     papers = load_papers(args.data)
     split = get_or_make_split(papers, args.split_out, seed=args.seed)
@@ -180,12 +199,24 @@ def main():
     test_f1 = macro_f1(y_test, pred_test)
     print(f"TEST macro_f1={test_f1:.4f}")
 
-    (out_dir / "train_summary.json").write_text(json.dumps({
+    train_summary = {
         "base_model": args.base_model, "finetune_mode": args.finetune_mode,
         "best_val_macro_f1": best_val_f1, "test_macro_f1": test_f1,
-        "seed": args.seed,
-    }, indent=2))
+        "seed": args.seed, "run_id": run_id,
+    }
+    (out_dir / "train_summary.json").write_text(json.dumps(train_summary, indent=2))
     print(f"wrote {out_dir / 'best_model.pt'} and {out_dir / 'train_summary.json'}")
+
+    # record in the repo-level append-only log immediately -- if this
+    # process is interrupted before evaluate.py runs, the run is still
+    # visible (with val metrics) rather than silently missing
+    upsert_run(args.repo_root, run_id, {
+        "base_model": args.base_model, "finetune_mode": args.finetune_mode,
+        "best_val_macro_f1": best_val_f1, "test_macro_f1": test_f1,
+        "config_path": str(out_dir / "config.json"),
+        "local_checkpoint_path": str(out_dir / "best_model.pt"),
+    })
+    print(f"run_id={run_id} logged to {args.repo_root}/runs_log.jsonl and RUNS.md")
 
 
 if __name__ == "__main__":

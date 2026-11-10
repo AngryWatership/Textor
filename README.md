@@ -38,9 +38,13 @@ src/
   model.py       encoder + classification head; full or partial fine-tune
   train.py       training loop, class-weighted loss, early stopping, checkpoints
   evaluate.py    confusion matrix, macro-F1, silhouette/purity on learned embeddings
+  runlog.py      append-only run log (runs_log.jsonl + RUNS.md), shared by train.py/evaluate.py
 notebooks/
-  colab_train.ipynb   thin GPU runner: clone this repo, pip install, run train.py + evaluate.py
+  colab_train.ipynb   thin GPU runner: clone this repo, pip install, run train.py + evaluate.py,
+                       mount Drive for checkpoints, push the lightweight run record back here
 requirements.txt
+runs_log.jsonl   append-only JSON-lines record of every run (one line per run_id, merged, never deleted)
+RUNS.md          human-readable table auto-generated from runs_log.jsonl -- do not hand-edit
 docs/
   prior_results.md    summary of the four CPU-only rounds, for context
 ```
@@ -51,7 +55,14 @@ docs/
 2. Run all cells: it clones this branch, installs `requirements.txt`,
    and calls `src/train.py` then `src/evaluate.py`.
 3. Results (confusion matrix, macro-F1, silhouette/purity) are written to
-   `outputs/` and also displayed inline in the notebook.
+   `outputs/<run_id>/` and also displayed inline in the notebook.
+4. The notebook copies the full run (including `best_model.pt`) to Google
+   Drive, then commits and pushes the lightweight record (`RUNS.md`,
+   `runs_log.jsonl`, that run's `config.json`/`train_summary.json`/
+   `eval_report.json`) back to this branch -- not the weights, those stay
+   on Drive. Checking `RUNS.md` in a later session, from a plain `git
+   clone`, tells you every run tried and what it scored without needing
+   Colab or Drive open at all.
 
 ## Configuration
 
@@ -61,6 +72,28 @@ See `src/train.py --help`. Key flags:
 - `--finetune-mode` : `partial` (default, freeze all but top 2 layers + head) | `full`
 - `--loss` : `weighted-ce` (default) | `focal`
 - `--seed` : fixed by default (42) for reproducibility
+
+## Reviewing past runs / persistence model
+
+Every run gets a `run_id` (`<UTC timestamp>_<base_model>_<finetune_mode>`)
+and its own `outputs/<run_id>/` directory, so nothing overwrites a prior
+run's checkpoint or config by accident.
+
+- **Full artifact (weights included)**: copied by the notebook to Google
+  Drive, at `MyDrive/paper-verdict-finetune/runs/<run_id>/`. Too large to
+  commit to git on every run.
+- **Lightweight record (no weights)**: `config.json`, `train_summary.json`,
+  `eval_report.json` for that run_id, plus the repo-root `runs_log.jsonl`
+  (append-only, one JSON object per run_id, fields merged in by both
+  `train.py` and `evaluate.py` via `src/runlog.py:upsert_run`) and the
+  auto-regenerated `RUNS.md` table. These get committed and pushed back to
+  this branch, so `RUNS.md` is always a current index of every run --
+  readable from a fresh `git clone` with no GPU, no Colab, and no Drive
+  mount needed.
+
+Before launching a new run, read `RUNS.md` (the notebook does this
+automatically) to see what's already been tried and what the current best
+is to try to beat, instead of re-running a config already covered.
 
 ## Evaluation discipline
 
