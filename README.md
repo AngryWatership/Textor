@@ -60,8 +60,12 @@ docs/
 ## Quickstart (Colab)
 
 1. Open `notebooks/colab_train.ipynb` in Colab, select a GPU runtime.
-2. Run all cells: it clones this branch, installs `requirements.txt`,
-   and calls `src/train.py` then `src/evaluate.py`.
+2. Run all cells: it clones this branch (anonymous, read-only), installs
+   `requirements.txt`, and calls `src/train.py` then `src/evaluate.py`.
+   When prompted, paste a GitHub personal access token with write access
+   to this repo (github.com/settings/tokens, "repo" scope) -- the clone
+   itself has no credentials, so pushing the run back at the end needs
+   this token. It's only used for that one push and not saved anywhere.
 3. Results (confusion matrix, macro-F1, silhouette/purity) are written to
    `outputs/<run_id>/` and also displayed inline in the notebook.
 4. The notebook commits the full run -- `best_model.pt`, `vocab.json`,
