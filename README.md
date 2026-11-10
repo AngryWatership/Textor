@@ -41,7 +41,7 @@ src/
   runlog.py      append-only run log (runs_log.jsonl + RUNS.md), shared by train.py/evaluate.py
 notebooks/
   colab_train.ipynb   thin GPU runner: clone this repo, pip install, run train.py + evaluate.py,
-                       mount Drive for checkpoints, push the lightweight run record back here
+                       upload checkpoints to Hugging Face Hub, push the lightweight run record back here
 requirements.txt
 runs_log.jsonl   append-only JSON-lines record of every run (one line per run_id, merged, never deleted)
 RUNS.md          human-readable table auto-generated from runs_log.jsonl -- do not hand-edit
@@ -56,13 +56,14 @@ docs/
    and calls `src/train.py` then `src/evaluate.py`.
 3. Results (confusion matrix, macro-F1, silhouette/purity) are written to
    `outputs/<run_id>/` and also displayed inline in the notebook.
-4. The notebook copies the full run (including `best_model.pt`) to Google
-   Drive, then commits and pushes the lightweight record (`RUNS.md`,
-   `runs_log.jsonl`, that run's `config.json`/`train_summary.json`/
-   `eval_report.json`) back to this branch -- not the weights, those stay
-   on Drive. Checking `RUNS.md` in a later session, from a plain `git
-   clone`, tells you every run tried and what it scored without needing
-   Colab or Drive open at all.
+4. The notebook uploads the full run (including `best_model.pt`) to a
+   Hugging Face Hub model repo (temporary third-party storage, deliberately
+   kept off your Google Drive), then commits and pushes the lightweight
+   record (`RUNS.md`, `runs_log.jsonl`, that run's `config.json`/
+   `train_summary.json`/`eval_report.json`) back to this branch -- not the
+   weights, those stay on the Hub. Checking `RUNS.md` in a later session,
+   from a plain `git clone`, tells you every run tried and what it scored
+   without needing Colab, a Hub token, or Drive at all.
 
 ## Configuration
 
@@ -79,17 +80,20 @@ Every run gets a `run_id` (`<UTC timestamp>_<base_model>_<finetune_mode>`)
 and its own `outputs/<run_id>/` directory, so nothing overwrites a prior
 run's checkpoint or config by accident.
 
-- **Full artifact (weights included)**: copied by the notebook to Google
-  Drive, at `MyDrive/paper-verdict-finetune/runs/<run_id>/`. Too large to
-  commit to git on every run.
+- **Full artifact (weights included)**: uploaded by the notebook to a
+  Hugging Face Hub model repo (`HF_REPO_ID`, created automatically on first
+  run), at `runs/<run_id>/`. Too large to commit to git on every run, and
+  deliberately kept off Google Drive so it carries no risk to anything
+  else already stored there -- this is temporary, swappable third-party
+  storage, not tied to this project long-term.
 - **Lightweight record (no weights)**: `config.json`, `train_summary.json`,
   `eval_report.json` for that run_id, plus the repo-root `runs_log.jsonl`
   (append-only, one JSON object per run_id, fields merged in by both
   `train.py` and `evaluate.py` via `src/runlog.py:upsert_run`) and the
   auto-regenerated `RUNS.md` table. These get committed and pushed back to
   this branch, so `RUNS.md` is always a current index of every run --
-  readable from a fresh `git clone` with no GPU, no Colab, and no Drive
-  mount needed.
+  readable from a fresh `git clone` with no GPU, no Colab, and no Hugging
+  Face token needed.
 
 Before launching a new run, read `RUNS.md` (the notebook does this
 automatically) to see what's already been tried and what the current best

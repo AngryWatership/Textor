@@ -6,3 +6,4 @@ numpy>=1.26
 pandas>=2.2
 matplotlib>=3.8
 accelerate>=0.30
+huggingface_hub>=0.23
