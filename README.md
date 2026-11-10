@@ -49,7 +49,7 @@ src/
   runlog.py      append-only run log (runs_log.jsonl + RUNS.md), shared by train.py/evaluate.py
 notebooks/
   colab_train.ipynb   thin GPU runner: clone this repo, pip install, run train.py + evaluate.py,
-                       zip checkpoints for direct browser download, push the lightweight run record back here
+                       commit the full run (checkpoint included) straight back to this branch
 requirements.txt
 runs_log.jsonl   append-only JSON-lines record of every run (one line per run_id, merged, never deleted)
 RUNS.md          human-readable table auto-generated from runs_log.jsonl -- do not hand-edit
@@ -64,14 +64,13 @@ docs/
    and calls `src/train.py` then `src/evaluate.py`.
 3. Results (confusion matrix, macro-F1, silhouette/purity) are written to
    `outputs/<run_id>/` and also displayed inline in the notebook.
-4. The notebook zips the full run (including `best_model.pt`) and prompts
-   you with a direct browser download -- no third-party account, no Drive.
-   It then commits and pushes the lightweight record (`RUNS.md`,
-   `runs_log.jsonl`, that run's `config.json`/`train_summary.json`/
-   `eval_report.json`) back to this branch -- not the weights, those only
-   exist in the zip you downloaded. Checking `RUNS.md` in a later session,
-   from a plain `git clone`, tells you every run tried and what it scored
-   without needing Colab at all.
+4. The notebook commits the full run -- `best_model.pt`, `vocab.json`,
+   `config.json`, `train_summary.json`, `eval_report.json` -- plus the
+   repo-level `RUNS.md`/`runs_log.jsonl`, and pushes straight back to this
+   branch. The model is trained from scratch, so a checkpoint is only
+   tens of MB, well under GitHub's per-file limit, no third-party
+   storage or manual download needed. A plain `git clone` of this branch
+   in a later session gets you both the run history and the weights.
 
 ## Configuration
 
@@ -91,20 +90,19 @@ Every run gets a `run_id` (`<UTC timestamp>_scratch-transformer_<dims>d<layers>l
 and its own `outputs/<run_id>/` directory, so nothing overwrites a prior
 run's checkpoint, vocab, or config by accident.
 
-- **Full artifact (weights included)**: zipped by the notebook at the end
-  of the run (`outputs/<run_id>.zip`) and handed to you as a direct
-  browser download via `google.colab.files.download`. No third-party
-  storage account, and deliberately kept off Google Drive so it carries
-  no risk to anything else already stored there. Save the zip yourself;
-  re-upload it to a later Colab session if you need that checkpoint again.
-- **Lightweight record (no weights)**: `config.json`, `train_summary.json`,
-  `eval_report.json` for that run_id, plus the repo-root `runs_log.jsonl`
-  (append-only, one JSON object per run_id, fields merged in by both
-  `train.py` and `evaluate.py` via `src/runlog.py:upsert_run`) and the
-  auto-regenerated `RUNS.md` table. These get committed and pushed back to
-  this branch, so `RUNS.md` is always a current index of every run --
-  readable from a fresh `git clone` with no GPU, no Colab, and no account
-  of any kind needed.
+- **Everything, including weights**: `best_model.pt`, `vocab.json`,
+  `config.json`, `train_summary.json`, `eval_report.json` for that
+  run_id, plus the repo-root `runs_log.jsonl` (append-only, one JSON
+  object per run_id, fields merged in by both `train.py` and
+  `evaluate.py` via `src/runlog.py:upsert_run`) and the auto-regenerated
+  `RUNS.md` table. All of it gets committed and pushed back to this
+  branch. This only works because the model is trained from scratch --
+  a checkpoint at the default size is ~44 MB, far under GitHub's 100 MB
+  per-file limit. A pretrained checkpoint (hundreds of MB to a few GB)
+  would not fit this way; that's why earlier drafts of this repo kept
+  weights out of git. `RUNS.md` is a current index of every run,
+  checkpoint included, readable from a fresh `git clone` with no GPU, no
+  Colab, and no account of any kind needed.
 
 Before launching a new run, read `RUNS.md` (the notebook does this
 automatically) to see what's already been tried and what the current best

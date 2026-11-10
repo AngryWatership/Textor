@@ -1,2 +1,3 @@
 __pycache__/
-outputs/
+# NOTE: outputs/ is intentionally NOT ignored -- per-run checkpoints
+# (small, from-scratch models) are meant to be committed directly.
