@@ -2,9 +2,10 @@
 always-regenerated human-readable RUNS.md table.
 
 This is the thing to read first in a later session to see what's already
-been tried, what it scored, and where its checkpoint lives (a Hugging
-Face Hub repo path -- see notebooks/colab_train.ipynb), before deciding
-what to run next -- never trimmed, never hand-edited.
+been tried, what it scored, and whether its checkpoint still exists (it
+only ever lived as a browser download at the end of that run -- see
+notebooks/colab_train.ipynb), before deciding what to run next -- never
+trimmed, never hand-edited.
 """
 import json
 from pathlib import Path
@@ -63,7 +64,7 @@ def _write_runs_md(repo_root, records):
             f"| {run_id} | {rec.get('base_model', '')} | {rec.get('finetune_mode', '')} | "
             f"{rec.get('best_val_macro_f1', '')} | {rec.get('test_macro_f1', '')} | "
             f"{rec.get('test_silhouette_euclidean', '')} | {rec.get('test_knn10_purity', '')} | "
-            f"{rec.get('checkpoint_path', 'not yet uploaded (local: ' + str(rec.get('local_checkpoint_path', '?')) + ')')} | "
+            f"{rec.get('checkpoint_path', 'not yet downloaded (local: ' + str(rec.get('local_checkpoint_path', '?')) + ')')} | "
             f"{rec.get('updated_at', '')} |"
         )
     (Path(repo_root) / "RUNS.md").write_text("\n".join(lines) + "\n")
