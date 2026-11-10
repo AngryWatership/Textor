@@ -1,56 +1,64 @@
-"""Encoder + classification head, with a partial/full fine-tune toggle.
-
-partial (default): freeze all encoder layers except the top N (default 2)
-                    plus the classification head. Safer given only ~2,093
-                    labeled examples and a minority class of 218.
-full:               fine-tune every encoder parameter. Higher capacity,
-                    higher overfitting risk -- compare against partial's
-                    held-out numbers before trusting this is actually better.
+"""A Transformer encoder built entirely from scratch with torch.nn --
+no pretrained weights, no transformers library, no Hugging Face, no
+download of any kind. Randomly initialized and trained end-to-end on
+this project's own 2,093 papers (via train.py). A deterministic, fully
+trained function from paper text to label -- nothing queried, nothing
+prompted, no external model fetched at runtime.
 """
+import math
+
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer
 
 N_CLASSES = 3
 
 
-class VerdictClassifier(nn.Module):
-    def __init__(self, base_model="allenai/specter2_base", finetune_mode="partial",
-                 n_unfrozen_layers=2, dropout=0.2):
+class PositionalEncoding(nn.Module):
+    """Standard sinusoidal position encoding (Vaswani et al.), computed
+    directly -- no table or weights to load from anywhere."""
+
+    def __init__(self, d_model, max_len=512):
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(base_model)
-        hidden = self.encoder.config.hidden_size
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1).float()
+        div = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div)
+        pe[:, 1::2] = torch.cos(position * div)
+        self.register_buffer("pe", pe.unsqueeze(0))
+
+    def forward(self, x):
+        return x + self.pe[:, : x.size(1)]
+
+
+class VerdictTransformer(nn.Module):
+    """Embedding -> positional encoding -> nn.TransformerEncoder stack ->
+    masked mean pool -> linear classifier. Every parameter is randomly
+    initialized here and trained from zero; there is nothing frozen and
+    nothing pretrained, so model_size controls capacity directly rather
+    than choosing which of someone else's layers to unfreeze."""
+
+    def __init__(self, vocab_size, embed_dim=256, num_layers=4, num_heads=8,
+                 ffn_dim=1024, dropout=0.2, max_length=384, pad_id=0):
+        super().__init__()
+        self.pad_id = pad_id
+        self.embed = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_id)
+        self.pos = PositionalEncoding(embed_dim, max_len=max_length)
+        layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim, nhead=num_heads, dim_feedforward=ffn_dim,
+            dropout=dropout, batch_first=True, activation="gelu",
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(hidden, N_CLASSES)
-        self.finetune_mode = finetune_mode
-
-        if finetune_mode == "partial":
-            self._freeze_all_but_top(n_unfrozen_layers)
-        elif finetune_mode == "full":
-            pass  # everything trainable
-        else:
-            raise ValueError(f"unknown finetune_mode: {finetune_mode}")
-
-    def _freeze_all_but_top(self, n_unfrozen_layers):
-        for p in self.encoder.parameters():
-            p.requires_grad = False
-        # unfreeze embeddings' layer norm + top N transformer layers;
-        # exact module path depends on the base model's architecture
-        # (BERT-family models expose .encoder.layer)
-        layers = self.encoder.encoder.layer
-        for layer in layers[-n_unfrozen_layers:]:
-            for p in layer.parameters():
-                p.requires_grad = True
+        self.classifier = nn.Linear(embed_dim, N_CLASSES)
 
     def forward(self, input_ids, attention_mask):
-        out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        # mean-pool over tokens, masked -- works for any BERT-family encoder
-        last_hidden = out.last_hidden_state
+        x = self.embed(input_ids)
+        x = self.pos(x)
+        # TransformerEncoder's padding mask wants True where tokens should
+        # be ignored
+        key_padding_mask = attention_mask == 0
+        out = self.encoder(x, src_key_padding_mask=key_padding_mask)
         mask = attention_mask.unsqueeze(-1).float()
-        pooled = (last_hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+        pooled = (out * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
         logits = self.classifier(self.dropout(pooled))
-        return logits, pooled  # return pooled embedding too, for silhouette/purity eval
-
-
-def load_tokenizer(base_model):
-    return AutoTokenizer.from_pretrained(base_model)
+        return logits, pooled  # pooled embedding too, for silhouette/purity eval

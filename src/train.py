@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Train VerdictClassifier on papers.jsonl. GPU strongly recommended.
+"""Train VerdictTransformer (a from-scratch encoder, no pretrained weights,
+no Hugging Face) on papers.jsonl. GPU strongly recommended.
 
 Usage:
-    python src/train.py --base-model allenai/specter2_base --finetune-mode partial
+    python src/train.py --embed-dim 256 --num-layers 4
 """
 import argparse
 import json
@@ -16,14 +17,15 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 from data import load_papers, get_or_make_split, text_of, LABEL_TO_ID
-from model import VerdictClassifier, load_tokenizer
+from model import VerdictTransformer
+from tokenizer import build_vocab, save_vocab, encode as tok_encode, PAD
 from runlog import new_run_id, upsert_run
 
 
 class PapersDataset(Dataset):
-    def __init__(self, papers, indices, tokenizer, max_length=384):
+    def __init__(self, papers, indices, vocab, max_length=384):
         self.papers = [papers[i] for i in indices]
-        self.tokenizer = tokenizer
+        self.vocab = vocab
         self.max_length = max_length
 
     def __len__(self):
@@ -31,13 +33,10 @@ class PapersDataset(Dataset):
 
     def __getitem__(self, idx):
         p = self.papers[idx]
-        enc = self.tokenizer(
-            text_of(p), truncation=True, max_length=self.max_length,
-            padding="max_length", return_tensors="pt",
-        )
+        ids, attn = tok_encode(text_of(p), self.vocab, self.max_length)
         return {
-            "input_ids": enc["input_ids"].squeeze(0),
-            "attention_mask": enc["attention_mask"].squeeze(0),
+            "input_ids": torch.tensor(ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attn, dtype=torch.long),
             "label": torch.tensor(LABEL_TO_ID[p["verdict"]], dtype=torch.long),
         }
 
@@ -93,22 +92,29 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data/papers.jsonl")
     ap.add_argument("--split-out", default="outputs/split.json")
-    ap.add_argument("--base-model", default="allenai/specter2_base")
-    ap.add_argument("--finetune-mode", choices=["partial", "full"], default="partial")
-    ap.add_argument("--n-unfrozen-layers", type=int, default=2)
+    ap.add_argument("--vocab-out", default=None,
+                     help="defaults to <out-dir>/<run-id>/vocab.json; built "
+                          "fresh from --data every run (no download, cheap)")
+    ap.add_argument("--vocab-size", type=int, default=30000)
+    ap.add_argument("--vocab-min-freq", type=int, default=2)
+    ap.add_argument("--embed-dim", type=int, default=256)
+    ap.add_argument("--num-layers", type=int, default=4)
+    ap.add_argument("--num-heads", type=int, default=8)
+    ap.add_argument("--ffn-dim", type=int, default=1024)
+    ap.add_argument("--model-dropout", type=float, default=0.2)
     ap.add_argument("--loss", choices=["weighted-ce", "focal"], default="weighted-ce")
     ap.add_argument("--max-length", type=int, default=384)
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--lr", type=float, default=2e-5)
-    ap.add_argument("--max-epochs", type=int, default=30)
-    ap.add_argument("--patience", type=int, default=4)
+    ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--max-epochs", type=int, default=60)
+    ap.add_argument("--patience", type=int, default=6)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", default="outputs")
     ap.add_argument("--repo-root", default="..",
                      help="where runs_log.jsonl / RUNS.md live (repo root, not src/)")
     ap.add_argument("--run-id", default=None,
-                     help="defaults to <timestamp>_<base_model>_<finetune_mode>; "
-                          "pass explicitly to resume/overwrite a specific run")
+                     help="defaults to <timestamp>_scratch-transformer_<embed-dim>d"
+                          "<num-layers>l; pass explicitly to resume/overwrite a run")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -116,19 +122,24 @@ def main():
     print(f"device: {device}")
     if device == "cpu":
         print("WARNING: no GPU detected. This script is designed to run on a "
-              "Colab GPU runtime; CPU will be very slow for full/partial "
-              "fine-tuning of a transformer encoder.")
+              "Colab GPU runtime; CPU will be slow for a transformer encoder "
+              "trained from scratch.")
 
-    run_id = args.run_id or new_run_id(args.base_model, args.finetune_mode)
+    model_tag = f"scratch-transformer_{args.embed_dim}d{args.num_layers}l"
+    run_id = args.run_id or new_run_id(model_tag, "from-scratch")
     print(f"run_id: {run_id}")
     # every run gets its own subdirectory, nothing overwrites a prior run's
     # checkpoint/config/reports by accident
     out_dir = Path(args.out_dir) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    vocab_out = args.vocab_out or str(out_dir / "vocab.json")
+
     config = {
-        "run_id": run_id, "base_model": args.base_model,
-        "finetune_mode": args.finetune_mode, "n_unfrozen_layers": args.n_unfrozen_layers,
+        "run_id": run_id, "base_model": model_tag, "finetune_mode": "from-scratch",
+        "embed_dim": args.embed_dim, "num_layers": args.num_layers,
+        "num_heads": args.num_heads, "ffn_dim": args.ffn_dim,
+        "vocab_size": args.vocab_size, "vocab_min_freq": args.vocab_min_freq,
         "loss": args.loss, "max_length": args.max_length, "batch_size": args.batch_size,
         "lr": args.lr, "max_epochs": args.max_epochs, "patience": args.patience,
         "seed": args.seed,
@@ -139,18 +150,27 @@ def main():
     split = get_or_make_split(papers, args.split_out, seed=args.seed)
     print({k: len(v) for k, v in split.items()})
 
-    tokenizer = load_tokenizer(args.base_model)
-    train_ds = PapersDataset(papers, split["train"], tokenizer, args.max_length)
-    val_ds = PapersDataset(papers, split["val"], tokenizer, args.max_length)
-    test_ds = PapersDataset(papers, split["test"], tokenizer, args.max_length)
+    # vocabulary built only from this project's own corpus -- no download,
+    # no external subword model; trained-split-only would also be
+    # defensible, but vocabulary membership carries no label information,
+    # so building it from the full corpus (as any tokenizer step normally
+    # would) is not a leak of `verdict`
+    vocab = build_vocab((text_of(p) for p in papers), args.vocab_size, args.vocab_min_freq)
+    save_vocab(vocab, vocab_out)
+    print(f"built {len(vocab)}-token vocab -> {vocab_out}")
+
+    train_ds = PapersDataset(papers, split["train"], vocab, args.max_length)
+    val_ds = PapersDataset(papers, split["val"], vocab, args.max_length)
+    test_ds = PapersDataset(papers, split["test"], vocab, args.max_length)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size)
 
-    model = VerdictClassifier(
-        base_model=args.base_model, finetune_mode=args.finetune_mode,
-        n_unfrozen_layers=args.n_unfrozen_layers,
+    model = VerdictTransformer(
+        vocab_size=len(vocab), embed_dim=args.embed_dim, num_layers=args.num_layers,
+        num_heads=args.num_heads, ffn_dim=args.ffn_dim, dropout=args.model_dropout,
+        max_length=args.max_length, pad_id=vocab[PAD],
     ).to(device)
 
     weights = class_weights_from(papers, split["train"]).to(device)
@@ -159,8 +179,7 @@ def main():
     else:
         criterion = FocalLoss(gamma=2.0, weight=weights)
 
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
 
     best_val_f1 = -1.0
     best_state = None
@@ -200,7 +219,7 @@ def main():
     print(f"TEST macro_f1={test_f1:.4f}")
 
     train_summary = {
-        "base_model": args.base_model, "finetune_mode": args.finetune_mode,
+        "base_model": model_tag, "finetune_mode": "from-scratch",
         "best_val_macro_f1": best_val_f1, "test_macro_f1": test_f1,
         "seed": args.seed, "run_id": run_id,
     }
@@ -211,7 +230,7 @@ def main():
     # process is interrupted before evaluate.py runs, the run is still
     # visible (with val metrics) rather than silently missing
     upsert_run(args.repo_root, run_id, {
-        "base_model": args.base_model, "finetune_mode": args.finetune_mode,
+        "base_model": model_tag, "finetune_mode": "from-scratch",
         "best_val_macro_f1": best_val_f1, "test_macro_f1": test_f1,
         "config_path": str(out_dir / "config.json"),
         "local_checkpoint_path": str(out_dir / "best_model.pt"),

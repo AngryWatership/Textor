@@ -6,7 +6,7 @@ apples-to-apples comparison against raw MiniLM, LDA, supervised UMAP, the
 contrastive head, and the instruction embedding (see docs/prior_results.md).
 
 Usage:
-    python src/evaluate.py --checkpoint outputs/best_model.pt --base-model allenai/specter2_base
+    python src/evaluate.py --run-id <run_id>
 """
 import argparse
 import json
@@ -19,7 +19,8 @@ from sklearn.metrics import confusion_matrix, silhouette_score
 from sklearn.neighbors import NearestNeighbors
 
 from data import load_papers, get_or_make_split, LABELS
-from model import VerdictClassifier, load_tokenizer
+from model import VerdictTransformer
+from tokenizer import load_vocab, PAD
 from train import PapersDataset
 from runlog import upsert_run
 
@@ -41,8 +42,13 @@ def main():
     ap.add_argument("--split-out", default="outputs/split.json")
     ap.add_argument("--checkpoint", default=None,
                      help="defaults to <out-dir>/<run-id>/best_model.pt")
-    ap.add_argument("--base-model", default="allenai/specter2_base")
-    ap.add_argument("--finetune-mode", choices=["partial", "full"], default="partial")
+    ap.add_argument("--vocab", default=None,
+                     help="defaults to <out-dir>/<run-id>/vocab.json "
+                          "(written by train.py for this same run)")
+    ap.add_argument("--embed-dim", type=int, default=256)
+    ap.add_argument("--num-layers", type=int, default=4)
+    ap.add_argument("--num-heads", type=int, default=8)
+    ap.add_argument("--ffn-dim", type=int, default=1024)
     ap.add_argument("--max-length", type=int, default=384)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--out-dir", default="outputs")
@@ -53,16 +59,21 @@ def main():
     args = ap.parse_args()
     out_dir = Path(args.out_dir) / args.run_id
     checkpoint_path = args.checkpoint or str(out_dir / "best_model.pt")
+    vocab_path = args.vocab or str(out_dir / "vocab.json")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     papers = load_papers(args.data)
     split = get_or_make_split(papers, args.split_out)
-    tokenizer = load_tokenizer(args.base_model)
-    test_ds = PapersDataset(papers, split["test"], tokenizer, args.max_length)
+    vocab = load_vocab(vocab_path)
+    test_ds = PapersDataset(papers, split["test"], vocab, args.max_length)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size)
 
-    model = VerdictClassifier(base_model=args.base_model, finetune_mode=args.finetune_mode).to(device)
+    model = VerdictTransformer(
+        vocab_size=len(vocab), embed_dim=args.embed_dim, num_layers=args.num_layers,
+        num_heads=args.num_heads, ffn_dim=args.ffn_dim, max_length=args.max_length,
+        pad_id=vocab[PAD],
+    ).to(device)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.eval()
 

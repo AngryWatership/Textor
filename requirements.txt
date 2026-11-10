@@ -1,8 +1,8 @@
+# pure PyTorch, no Hugging Face transformers/datasets/accelerate and no
+# pretrained-model download of any kind -- the encoder in src/model.py is
+# built from scratch with torch.nn and trained end-to-end by src/train.py
 torch>=2.2
-transformers>=4.40
-datasets>=2.19
 scikit-learn>=1.4
 numpy>=1.26
 pandas>=2.2
 matplotlib>=3.8
-accelerate>=0.30

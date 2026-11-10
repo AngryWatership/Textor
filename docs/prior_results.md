@@ -47,6 +47,8 @@ of frozen features (round 4, approach 2). Metrics are out-of-fold
    -- but it was still a small head on top of a *frozen* base embedding.
    It never got to reshape the representation itself.
 
-That's the gap this repo is built to close: full (or partial) fine-tuning
-of the base encoder on a GPU, so the representation can be reshaped
-directly around `verdict`, rather than re-projected after the fact.
+That's the gap this repo is built to close: a Transformer encoder trained
+end to end, from random initialization (no pretrained weights, no
+Hugging Face, no download), on a GPU, so the representation is built
+directly around `verdict` from the start, rather than re-projected or
+fine-tuned on top of someone else's fixed features.
